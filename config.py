@@ -1,13 +1,14 @@
 import os
 from dotenv import load_dotenv
 
-# Загружаем переменные из .env файла (для локальной разработки)
 load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-# Ссылка на базу данных, Railway выдаст её в формате postgresql://...
-# Нам нужно заменить её на postgresql+asyncpg:// для асинхронной работы
-DATABASE_URL = os.getenv("DATABASE_URL", "").replace("postgresql://", "postgresql+asyncpg://")
+DATABASE_URL = os.getenv("DATABASE_URL")
 
-# ID супер-админов (владельцев) - сюда впишешь ваши Telegram ID
-SUPERADMINS = [123456789, 987654321]
+# Прописываем ID прямо здесь. Теперь это наш "белый список"
+ADMIN_IDS = [2103579364, 146156901]
+
+# Магия для SQLAlchemy (оставляем, чтобы база работала)
+if DATABASE_URL and DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+asyncpg://", 1)
