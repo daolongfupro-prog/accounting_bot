@@ -33,6 +33,6 @@ class History(Base):
     
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey('users.id'))
-    action_type: Mapped[str] = mapped_column(String(20)) # massage / education
+    action_type: Mapped[str] = mapped_column(String(20))
     amount: Mapped[int] = mapped_column()
     created_at: Mapped[DateTime] = mapped_column(DateTime, default=func.now())
