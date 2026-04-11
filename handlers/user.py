@@ -8,10 +8,53 @@ from config import SUPERADMINS
 
 router = Router()
 
-def get_user_main_kb():
+# --- СЛОВАРЬ ПЕРЕВОДОВ ---
+TEXTS = {
+    "ru": {
+        "main_menu": "Выберите действие:",
+        "balance": "📊 Мой остаток",
+        "change_lang": "🌐 Сменить язык",
+        "profile_head": "📋 <b>Ваши активные услуги:</b>",
+        "massage": "💆‍♂️ Массаж",
+        "edu": "🎓 Обучение",
+        "rem": "Остаток",
+        "of": "из",
+        "active": "✅ Активен",
+        "completed": "🏁 Завершен",
+        "lang_set": "✅ Язык установлен!"
+    },
+    "uz": {
+        "main_menu": "Harakatni tanlang:",
+        "balance": "📊 Mening qoldig'im",
+        "change_lang": "🌐 Tilni o'zgartirish",
+        "profile_head": "📋 <b>Sizning faol xizmatlaringiz:</b>",
+        "massage": "💆‍♂️ Massaj",
+        "edu": "🎓 O'qitish",
+        "rem": "Qoldiq",
+        "of": "dan",
+        "active": "✅ Faol",
+        "completed": "🏁 Yakunlandi",
+        "lang_set": "✅ Til o'rnatildi!"
+    },
+    "en": {
+        "main_menu": "Choose an action:",
+        "balance": "📊 My balance",
+        "change_lang": "🌐 Change language",
+        "profile_head": "📋 <b>Your active services:</b>",
+        "massage": "💆‍♂️ Massage",
+        "edu": "🎓 Education",
+        "rem": "Remaining",
+        "of": "of",
+        "active": "✅ Active",
+        "completed": "🏁 Completed",
+        "lang_set": "✅ Language set!"
+    }
+}
+
+def get_user_main_kb(lang="ru"):
     return ReplyKeyboardMarkup(keyboard=[
-        [KeyboardButton(text="📊 Мой остаток")],
-        [KeyboardButton(text="🌐 Сменить язык")]
+        [KeyboardButton(text=TEXTS[lang]["balance"])],
+        [KeyboardButton(text=TEXTS[lang]["change_lang"])]
     ], resize_keyboard=True)
 
 def get_language_kb():
@@ -35,46 +78,45 @@ async def cmd_start_deep_link(message: Message, command: CommandObject):
 @router.message(CommandStart())
 async def cmd_start_normal(message: Message):
     if message.from_user.id in SUPERADMINS:
-        await message.answer("⚙️ Режим администратора: /admin", reply_markup=get_user_main_kb())
+        await message.answer("⚙️ Режим администратора: /admin", reply_markup=get_user_main_kb("ru"))
         return
 
     user = await get_user_by_tg_id(message.from_user.id)
+    lang = user.language if user and user.language in TEXTS else "ru"
+    
     if user:
-        await message.answer(f"Рады видеть вас снова, {user.full_name}!", reply_markup=get_user_main_kb())
+        await message.answer(f"Рады видеть вас снова, {user.full_name}!", reply_markup=get_user_main_kb(lang))
     else:
         await message.answer("🔒 Доступ ограничен. Обратитесь к мастеру.")
 
 @router.callback_query(F.data.startswith("lang_"))
 async def process_language_selection(callback: CallbackQuery):
     lang_code = callback.data.split("_")[1]
-    
-    # Сохраняем язык в базу
     await update_user_language(callback.from_user.id, lang_code)
     
-    confirmations = {
-        "ru": "✅ Язык установлен!",
-        "uz": "✅ Til o'rnatildi!",
-        "en": "✅ Language set!"
-    }
-    
-    await callback.message.edit_text(confirmations.get(lang_code, "✅ Done!"))
-    await callback.answer() # Убирает "часики" загрузки
+    # Сразу обновляем меню на новом языке
+    await callback.message.answer(TEXTS[lang_code]["lang_set"], reply_markup=get_user_main_kb(lang_code))
+    await callback.message.delete()
+    await callback.answer()
 
-@router.message(F.text == "📊 Мой остаток")
+@router.message(F.text.in_([TEXTS["ru"]["balance"], TEXTS["uz"]["balance"], TEXTS["en"]["balance"]]))
 async def show_profile(message: Message):
     user = await get_user_by_tg_id(message.from_user.id)
+    lang = user.language if user and user.language in TEXTS else "ru"
+    
     if not user or not user.packages:
         await message.answer("У вас пока нет активных услуг.")
         return
 
-    text = "📋 <b>Ваши активные услуги:</b>\n\n"
+    text = f"{TEXTS[lang]['profile_head']}\n\n"
     for p in user.packages:
-        name = "💆‍♂️ Массаж" if p.package_type == "massage" else "🎓 Обучение"
+        name = TEXTS[lang]["massage"] if p.package_type == "massage" else TEXTS[lang]["edu"]
         rem = p.total_sessions - p.used_sessions
-        text += f"{name}\nОстаток: <b>{rem}</b> из {p.total_sessions}\nСтатус: {'✅ Активен' if p.status == 'active' else '🏁 Завершен'}\n\n"
+        status = TEXTS[lang]["active"] if p.status == "active" else TEXTS[lang]["completed"]
+        text += f"{name}\n{TEXTS[lang]['rem']}: <b>{rem}</b> {TEXTS[lang]['of']} {p.total_sessions}\n{status}\n\n"
     
     await message.answer(text, parse_mode="HTML")
 
-@router.message(F.text == "🌐 Сменить язык")
+@router.message(F.text.in_([TEXTS["ru"]["change_lang"], TEXTS["uz"]["change_lang"], TEXTS["en"]["change_lang"]]))
 async def change_lang(message: Message):
     await message.answer("Выберите язык / Tilni tanlang / Choose language:", reply_markup=get_language_kb())
