@@ -1,122 +1,136 @@
-from aiogram import Router, F
+from __future__ import annotations
+
+import logging
+
+from aiogram import F, Router
 from aiogram.filters import CommandStart, CommandObject
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import (
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    KeyboardButton,
+    Message,
+    ReplyKeyboardMarkup,
+)
 from aiogram.utils.deep_linking import decode_payload
 
-from database.requests import link_telegram_id, get_user_by_tg_id, update_user_language
-from config import SUPERADMINS
+from config import settings
+from database.models import User
+from database.requests import link_telegram_id, update_user_language
+from middlewares.i18n import TEXTS, get_texts
 
+logger = logging.getLogger(__name__)
 router = Router()
 
-# --- СЛОВАРЬ ПЕРЕВОДОВ ---
-TEXTS = {
-    "ru": {
-        "main_menu": "Выберите действие:",
-        "balance": "📊 Мой остаток",
-        "change_lang": "🌐 Сменить язык",
-        "profile_head": "📋 <b>Ваши активные услуги:</b>",
-        "massage": "💆‍♂️ Массаж",
-        "edu": "🎓 Обучение",
-        "rem": "Остаток",
-        "of": "из",
-        "active": "✅ Активен",
-        "completed": "🏁 Завершен",
-        "lang_set": "✅ Язык установлен!"
-    },
-    "uz": {
-        "main_menu": "Harakatni tanlang:",
-        "balance": "📊 Mening qoldig'im",
-        "change_lang": "🌐 Tilni o'zgartirish",
-        "profile_head": "📋 <b>Sizning faol xizmatlaringiz:</b>",
-        "massage": "💆‍♂️ Massaj",
-        "edu": "🎓 O'qitish",
-        "rem": "Qoldiq",
-        "of": "dan",
-        "active": "✅ Faol",
-        "completed": "🏁 Yakunlandi",
-        "lang_set": "✅ Til o'rnatildi!"
-    },
-    "en": {
-        "main_menu": "Choose an action:",
-        "balance": "📊 My balance",
-        "change_lang": "🌐 Change language",
-        "profile_head": "📋 <b>Your active services:</b>",
-        "massage": "💆‍♂️ Massage",
-        "edu": "🎓 Education",
-        "rem": "Remaining",
-        "of": "of",
-        "active": "✅ Active",
-        "completed": "🏁 Completed",
-        "lang_set": "✅ Language set!"
-    }
-}
 
-def get_user_main_kb(lang="ru"):
-    return ReplyKeyboardMarkup(keyboard=[
-        [KeyboardButton(text=TEXTS[lang]["balance"])],
-        [KeyboardButton(text=TEXTS[lang]["change_lang"])]
-    ], resize_keyboard=True)
+# --- Клавиатуры ---
 
-def get_language_kb():
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🇷🇺 Русский", callback_data="lang_ru")],
-        [InlineKeyboardButton(text="🇺🇿 O'zbekcha", callback_data="lang_uz")],
-        [InlineKeyboardButton(text="🇬🇧 English", callback_data="lang_en")]
-    ])
+def get_user_main_kb(lang: str = "ru") -> ReplyKeyboardMarkup:
+    t = TEXTS[lang]
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text=t["balance"])],
+            [KeyboardButton(text=t["change_lang"])],
+        ],
+        resize_keyboard=True,
+    )
+
+
+def get_language_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🇷🇺 Русский", callback_data="lang_ru")],
+            [InlineKeyboardButton(text="🇺🇿 O'zbekcha", callback_data="lang_uz")],
+            [InlineKeyboardButton(text="🇬🇧 English", callback_data="lang_en")],
+        ]
+    )
+
+
+# --- Хендлеры ---
 
 @router.message(CommandStart(deep_link=True))
-async def cmd_start_deep_link(message: Message, command: CommandObject):
+async def cmd_start_deep_link(
+    message: Message,
+    command: CommandObject,
+    texts: dict,
+) -> None:
     try:
         db_user_id = int(decode_payload(command.args))
         user = await link_telegram_id(db_user_id, message.from_user.id)
         if user:
-            await message.answer(f"🌟 Здравствуйте, <b>{user.full_name}</b>!\nВыберите язык / Tilni tanlang / Choose language:", 
-                                reply_markup=get_language_kb(), parse_mode="HTML")
+            await message.answer(
+                texts["greeting"].format(name=user.full_name),
+                reply_markup=get_language_kb(),
+            )
+        else:
+            await message.answer(texts["invalid_link"])
     except Exception:
-        await message.answer("❌ Ссылка недействительна.")
+        logger.exception("Ошибка deep link tg_id=%s", message.from_user.id)
+        await message.answer(texts["invalid_link"])
+
 
 @router.message(CommandStart())
-async def cmd_start_normal(message: Message):
-    if message.from_user.id in SUPERADMINS:
+async def cmd_start_normal(
+    message: Message,
+    db_user: User | None,
+    texts: dict,
+) -> None:
+    if message.from_user.id in settings.SUPERADMIN_IDS:
         await message.answer("⚙️ Режим администратора: /admin", reply_markup=get_user_main_kb("ru"))
         return
 
-    user = await get_user_by_tg_id(message.from_user.id)
-    lang = user.language if user and user.language in TEXTS else "ru"
-    
-    if user:
-        await message.answer(f"Рады видеть вас снова, {user.full_name}!", reply_markup=get_user_main_kb(lang))
+    if db_user:
+        lang = db_user.language if db_user.language in TEXTS else "ru"
+        await message.answer(
+            texts["welcome_back"].format(name=db_user.full_name),
+            reply_markup=get_user_main_kb(lang),
+        )
     else:
-        await message.answer("🔒 Доступ ограничен. Обратитесь к мастеру.")
+        await message.answer(texts["access_denied"])
+
 
 @router.callback_query(F.data.startswith("lang_"))
-async def process_language_selection(callback: CallbackQuery):
+async def process_language_selection(
+    callback: CallbackQuery,
+    texts: dict,
+) -> None:
     lang_code = callback.data.split("_")[1]
     await update_user_language(callback.from_user.id, lang_code)
-    
-    # Сразу обновляем меню на новом языке
-    await callback.message.answer(TEXTS[lang_code]["lang_set"], reply_markup=get_user_main_kb(lang_code))
+    new_texts = TEXTS.get(lang_code, TEXTS["ru"])
+    await callback.message.answer(
+        new_texts["lang_set"],
+        reply_markup=get_user_main_kb(lang_code),
+    )
     await callback.message.delete()
     await callback.answer()
 
-@router.message(F.text.in_([TEXTS["ru"]["balance"], TEXTS["uz"]["balance"], TEXTS["en"]["balance"]]))
-async def show_profile(message: Message):
-    user = await get_user_by_tg_id(message.from_user.id)
-    lang = user.language if user and user.language in TEXTS else "ru"
-    
-    if not user or not user.packages:
-        await message.answer("У вас пока нет активных услуг.")
+
+@router.message(F.text.in_({t["balance"] for t in TEXTS.values()}))
+async def show_profile(
+    message: Message,
+    db_user: User | None,
+    texts: dict,
+) -> None:
+    if not db_user or not db_user.packages:
+        await message.answer(texts["no_services"])
         return
 
-    text = f"{TEXTS[lang]['profile_head']}\n\n"
-    for p in user.packages:
-        name = TEXTS[lang]["massage"] if p.package_type == "massage" else TEXTS[lang]["edu"]
-        rem = p.total_sessions - p.used_sessions
-        status = TEXTS[lang]["active"] if p.status == "active" else TEXTS[lang]["completed"]
-        text += f"{name}\n{TEXTS[lang]['rem']}: <b>{rem}</b> {TEXTS[lang]['of']} {p.total_sessions}\n{status}\n\n"
-    
-    await message.answer(text, parse_mode="HTML")
+    lang = db_user.language if db_user.language in TEXTS else "ru"
+    t = TEXTS[lang]
+    lines = [t["profile_head"], ""]
 
-@router.message(F.text.in_([TEXTS["ru"]["change_lang"], TEXTS["uz"]["change_lang"], TEXTS["en"]["change_lang"]]))
-async def change_lang(message: Message):
-    await message.answer("Выберите язык / Tilni tanlang / Choose language:", reply_markup=get_language_kb())
+    for p in db_user.packages:
+        name = t["massage"] if p.package_type.value == "massage" else t["edu"]
+        rem = p.total_sessions - p.used_sessions
+        status = t["active"] if p.status.value == "active" else t["completed"]
+        lines.append(f"{name}\n{t['rem']}: <b>{rem}</b> {t['of']} {p.total_sessions}\n{status}\n")
+
+    await message.answer("\n".join(lines))
+
+
+@router.message(F.text.in_({t["change_lang"] for t in TEXTS.values()}))
+async def change_lang(
+    message: Message,
+    texts: dict,
+) -> None:
+    await message.answer(texts["choose_lang"], reply_markup=get_language_kb())
